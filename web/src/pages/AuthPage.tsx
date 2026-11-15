@@ -15,7 +15,7 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
 
   const isLogin = mode === "login";
   const from = (location.state as { from?: string } | null)?.from;
-  if (user) return <Navigate to={from ?? `/studio/channel/${user.id}`} replace />;
+  if (user) return <Navigate to={from ?? "/feed"} replace />;
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();

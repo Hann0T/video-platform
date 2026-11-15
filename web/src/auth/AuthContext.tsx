@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { api, clearTokens, hasTokens } from "../api/client";
 import type { UserWithPermissions } from "../api/client";
 
@@ -14,6 +15,7 @@ type AuthState = {
 const AuthContext = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
   const [user, setUser] = useState<UserWithPermissions | null>(null);
   const [loading, setLoading] = useState(hasTokens());
 
@@ -42,8 +44,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     await api.logout();
+    queryClient.clear(); // don't show one user's cached data to the next
     setUser(null);
-  }, []);
+  }, [queryClient]);
 
   const value = useMemo(
     () => ({ user, loading, login, register, logout }),

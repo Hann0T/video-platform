@@ -1,10 +1,16 @@
 /**
  * API client for the backend. Unwraps the { data, error } envelope, attaches
  * the Bearer token, and retries once after a token refresh on 401.
+ *
+ * Authorization is decided entirely by the backend. This client only reports
+ * what the server answers (including 403/404) and never decides access.
  */
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3000";
 const STORAGE_KEY = "vidstream.tokens";
+
+export type Visibility = "private" | "public" | "unlisted";
+export const VISIBILITIES: Visibility[] = ["private", "public", "unlisted"];
 
 export type User = {
   id: string;
@@ -21,6 +27,7 @@ export type Video = {
   filename: string;
   mimeType: string;
   sizeBytes: number;
+  visibility: Visibility;
   ownerId: string;
   createdAt: string;
   updatedAt: string;
@@ -175,12 +182,32 @@ export const api = {
 
   me: () => request<UserWithPermissions>("/auth/me"),
 
-  uploadVideo(input: { file: File; title: string; description?: string }) {
+  /** Every public video. */
+  feed: () => request<Video[]>("/feed"),
+
+  /** All videos of a channel. The server answers 403 unless it is yours. */
+  channelVideos: (userId: string) =>
+    request<Video[]>(`/studio/channels/${encodeURIComponent(userId)}/videos`),
+
+  uploadVideo(
+    userId: string,
+    input: { file: File; title: string; description?: string; visibility: Visibility },
+  ) {
     const form = new FormData();
     // Text fields first so multer has parsed them before the file stream.
     form.append("title", input.title);
     if (input.description) form.append("description", input.description);
+    form.append("visibility", input.visibility);
     form.append("video", input.file);
-    return request<Video>("/videos", { method: "POST", body: form });
+    return request<Video>(`/studio/channels/${encodeURIComponent(userId)}/videos`, {
+      method: "POST",
+      body: form,
+    });
   },
+
+  updateVideo: (id: string, patch: { visibility: Visibility }) =>
+    request<Video>(`/videos/${encodeURIComponent(id)}`, { method: "PATCH", body: patch }),
+
+  deleteVideo: (id: string) =>
+    request<{ success: true }>(`/videos/${encodeURIComponent(id)}`, { method: "DELETE" }),
 };
