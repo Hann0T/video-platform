@@ -11,3 +11,4 @@ coverage/
 # keep storage dir but ignore uploaded media
 storage/videos/*
 !storage/videos/.gitkeep
+prisma/*.bak*

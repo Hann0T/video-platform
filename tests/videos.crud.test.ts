@@ -67,15 +67,23 @@ describe("video update/delete ownership (end-to-end integration)", () => {
     return tokens.accessToken;
   }
 
-  async function uploadAs(token: string, title = "Clip") {
-    const res = await request(app)
-      .post("/videos")
+  async function uploadAs(
+    token: string,
+    title = "Clip",
+    visibility?: "private" | "public" | "unlisted",
+  ) {
+    const me = await request(app)
+      .get("/auth/me")
+      .set("Authorization", `Bearer ${token}`);
+    const req = request(app)
+      .post(`/studio/channels/${me.body.data.id}/videos`)
       .set("Authorization", `Bearer ${token}`)
-      .field("title", title)
-      .attach("video", Buffer.from("bytes"), {
-        filename: "clip.mp4",
-        contentType: "video/mp4",
-      });
+      .field("title", title);
+    if (visibility) req.field("visibility", visibility);
+    const res = await req.attach("video", Buffer.from("bytes"), {
+      filename: "clip.mp4",
+      contentType: "video/mp4",
+    });
     return res.body.data;
   }
 
@@ -93,9 +101,9 @@ describe("video update/delete ownership (end-to-end integration)", () => {
     expect(res.body.data.description).toBe("new desc");
   });
 
-  it("non-owner (plain user) is blocked from updating (403)", async () => {
+  it("non-owner (plain user) is blocked from updating a public video (403)", async () => {
     const ownerToken = await tokenFor("owner@example.com");
-    const video = await uploadAs(ownerToken);
+    const video = await uploadAs(ownerToken, "Clip", "public");
     const otherToken = await tokenFor("intruder@example.com");
 
     const res = await request(app)
@@ -107,9 +115,9 @@ describe("video update/delete ownership (end-to-end integration)", () => {
     expect(res.body.error.code).toBe("FORBIDDEN");
   });
 
-  it("non-owner is blocked from deleting (403), file + row remain", async () => {
+  it("non-owner is blocked from deleting a public video (403), file + row remain", async () => {
     const ownerToken = await tokenFor("owner2@example.com");
-    const video = await uploadAs(ownerToken);
+    const video = await uploadAs(ownerToken, "Clip", "public");
     const otherToken = await tokenFor("intruder2@example.com");
 
     const res = await request(app)
@@ -162,6 +170,47 @@ describe("video update/delete ownership (end-to-end integration)", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.data.title).toBe("Admin edit");
+  });
+
+  it("non-owner gets 404 (not 403) on update/delete of a private video", async () => {
+    const ownerToken = await tokenFor("owner5@example.com");
+    const video = await uploadAs(ownerToken);
+    const otherToken = await tokenFor("intruder5@example.com");
+
+    const upd = await request(app)
+      .patch(`/videos/${video.id}`)
+      .set("Authorization", `Bearer ${otherToken}`)
+      .send({ title: "Hacked" });
+    expect(upd.status).toBe(404);
+
+    const del = await request(app)
+      .delete(`/videos/${video.id}`)
+      .set("Authorization", `Bearer ${otherToken}`);
+    expect(del.status).toBe(404);
+    expect(await db.prisma.video.count()).toBe(1);
+  });
+
+  it("owner can change visibility", async () => {
+    const token = await tokenFor("vis@example.com");
+    const video = await uploadAs(token);
+    expect(video.visibility).toBe("private");
+
+    const res = await request(app)
+      .patch(`/videos/${video.id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ visibility: "public" });
+    expect(res.status).toBe(200);
+    expect(res.body.data.visibility).toBe("public");
+  });
+
+  it("rejects an unknown visibility value (422)", async () => {
+    const token = await tokenFor("vis2@example.com");
+    const video = await uploadAs(token);
+    const res = await request(app)
+      .patch(`/videos/${video.id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ visibility: "secret" });
+    expect(res.status).toBe(422);
   });
 
   it("returns 404 when updating/deleting a missing video", async () => {

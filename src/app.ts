@@ -8,7 +8,11 @@ import {
   notFoundHandler,
 } from "./middleware/error-handler.js";
 import { createAuthRouter } from "./modules/auth/index.js";
-import { createVideosRouter } from "./modules/videos/index.js";
+import {
+  createFeedRouter,
+  createStudioRouter,
+  createVideosRouter,
+} from "./modules/videos/index.js";
 
 /**
  * Builds the Express application from a fully-wired container.
@@ -41,10 +45,19 @@ export function createApp(container: Container): Express {
   app.use("/auth", createAuthRouter(container.authService, container.authenticate));
   app.use(
     "/videos",
-    createVideosRouter(
+    createVideosRouter(container.videosService, container.authenticate),
+  );
+  app.use(
+    "/feed",
+    createFeedRouter(container.videosService, container.authenticate),
+  );
+  app.use(
+    "/studio",
+    createStudioRouter(
       container.videosService,
       container.authenticate,
       container.upload,
+      container.gate,
     ),
   );
 

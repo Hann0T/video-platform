@@ -19,11 +19,15 @@ function makeService(opts: {
   update?: ReturnType<typeof vi.fn>;
   dbDelete?: ReturnType<typeof vi.fn>;
   authorize?: ReturnType<typeof vi.fn>;
+  canVideo?: ReturnType<typeof vi.fn>;
+  authorizeChannel?: ReturnType<typeof vi.fn>;
+  findMany?: ReturnType<typeof vi.fn>;
 }) {
   const prisma = {
     video: {
       create: opts.create ?? vi.fn(),
       findUnique: opts.findUnique ?? vi.fn(),
+      findMany: opts.findMany ?? vi.fn().mockResolvedValue([]),
       update: opts.update ?? vi.fn(),
       delete: opts.dbDelete ?? vi.fn(),
     },
@@ -33,6 +37,8 @@ function makeService(opts: {
   } as unknown as StorageService;
   const gate = {
     authorizeVideo: opts.authorize ?? vi.fn(),
+    canVideo: opts.canVideo ?? vi.fn().mockReturnValue(true),
+    authorizeChannel: opts.authorizeChannel ?? vi.fn(),
   } as unknown as Gate;
   return {
     service: new VideosService(prisma, storage, gate),
@@ -117,6 +123,7 @@ const existingRow = {
   path: "/tmp/stored-abc.mp4",
   mimeType: "video/mp4",
   sizeBytes: 10,
+  visibility: "private",
   ownerId: "owner-1",
   createdAt: new Date(),
   updatedAt: new Date(),
@@ -135,6 +142,7 @@ describe("VideosService.update (unit)", () => {
 
     expect(authorize).toHaveBeenCalledWith(user, "update", {
       ownerId: "owner-1",
+      visibility: "private",
     });
     expect(update).toHaveBeenCalledOnce();
     expect(result.title).toBe("New title");
@@ -167,6 +175,66 @@ describe("VideosService.update (unit)", () => {
   });
 });
 
+describe("VideosService visibility (unit)", () => {
+  it("listFeed queries only public videos", async () => {
+    const findMany = vi.fn().mockResolvedValue([]);
+    const { service } = makeService({ findMany });
+    await service.listFeed();
+    expect(findMany.mock.calls[0][0].where).toEqual({ visibility: "public" });
+  });
+
+  it("listChannel authorizes the channel, then scopes the query to it", async () => {
+    const findMany = vi.fn().mockResolvedValue([]);
+    const authorizeChannel = vi.fn();
+    const { service } = makeService({ findMany, authorizeChannel });
+    await service.listChannel(user, "owner-1");
+    expect(authorizeChannel).toHaveBeenCalledWith(user, "owner-1");
+    expect(findMany.mock.calls[0][0].where).toEqual({ ownerId: "owner-1" });
+  });
+
+  it("listChannel does not query when the channel is not the user's", async () => {
+    const findMany = vi.fn();
+    const authorizeChannel = vi.fn(() => {
+      throw new ForbiddenError("denied");
+    });
+    const { service } = makeService({ findMany, authorizeChannel });
+    await expect(service.listChannel(user, "someone-else")).rejects.toMatchObject({
+      statusCode: 403,
+    });
+    expect(findMany).not.toHaveBeenCalled();
+  });
+
+  it("getById hides a video the user cannot view behind a 404", async () => {
+    const findUnique = vi.fn().mockResolvedValue(existingRow);
+    const canVideo = vi.fn().mockReturnValue(false);
+    const { service } = makeService({ findUnique, canVideo });
+    await expect(service.getById(user, "v1")).rejects.toMatchObject({
+      statusCode: 404,
+    });
+  });
+
+  it("update returns 404, never 403, when the user cannot view the video", async () => {
+    const findUnique = vi.fn().mockResolvedValue(existingRow);
+    const canVideo = vi.fn().mockReturnValue(false);
+    const authorize = vi.fn();
+    const { service } = makeService({ findUnique, canVideo, authorize });
+    await expect(
+      service.update(user, "v1", { title: "x" }),
+    ).rejects.toMatchObject({ statusCode: 404 });
+    expect(authorize).not.toHaveBeenCalled();
+  });
+
+  it("create defaults visibility to private", async () => {
+    const create = vi.fn().mockImplementation(({ data }) =>
+      Promise.resolve({ id: "v9", ...data, createdAt: new Date(), updatedAt: new Date() }),
+    );
+    const { service } = makeService({ create });
+    const result = await service.create("owner-1", { title: "t" }, file);
+    expect(create.mock.calls[0][0].data.visibility).toBe("private");
+    expect(result.visibility).toBe("private");
+  });
+});
+
 describe("VideosService.delete (unit)", () => {
   it("removes the DB row and the file when allowed", async () => {
     const findUnique = vi.fn().mockResolvedValue(existingRow);
@@ -179,6 +247,7 @@ describe("VideosService.delete (unit)", () => {
 
     expect(authorize).toHaveBeenCalledWith(user, "delete", {
       ownerId: "owner-1",
+      visibility: "private",
     });
     expect(dbDelete).toHaveBeenCalledWith({ where: { id: "v1" } });
     expect(del).toHaveBeenCalledWith("stored-abc.mp4");

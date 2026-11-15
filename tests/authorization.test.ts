@@ -30,7 +30,7 @@ const admin = {
   ],
 };
 
-const video = { ownerId: "owner-1" };
+const video = { ownerId: "owner-1", visibility: "private" as const };
 
 describe("VideoPolicy (unit)", () => {
   const policy = new VideoPolicy();
@@ -50,9 +50,37 @@ describe("VideoPolicy (unit)", () => {
     expect(policy.canDelete(admin, video)).toBe(true);
   });
 
-  it("allows viewing for anyone with read permission", () => {
-    expect(policy.canView(owner)).toBe(true);
-    expect(policy.canView({ id: "x", permissions: [] })).toBe(false);
+  it("lets anyone with read permission view a public video", () => {
+    const pub = { ownerId: "someone-else", visibility: "public" as const };
+    expect(policy.canView(owner, pub)).toBe(true);
+    expect(policy.canView({ id: "x", permissions: [] }, pub)).toBe(false);
+  });
+
+  it("hides private and unlisted videos from non-owners", () => {
+    const reader = { id: "reader", permissions: [PERMISSIONS.VIDEO_READ] };
+    for (const visibility of ["private", "unlisted"] as const) {
+      expect(policy.canView(reader, { ownerId: "o", visibility })).toBe(false);
+    }
+  });
+
+  it("always lets the owner view their own video", () => {
+    for (const visibility of ["private", "public", "unlisted"] as const) {
+      expect(
+        policy.canView({ id: "o", permissions: [] }, { ownerId: "o", visibility }),
+      ).toBe(true);
+    }
+  });
+
+  it("lets moderators view private videos", () => {
+    expect(
+      policy.canView(admin, { ownerId: "o", visibility: "private" }),
+    ).toBe(true);
+  });
+
+  it("restricts a channel to its owner, admins included", () => {
+    expect(policy.canAccessChannel(owner, owner.id)).toBe(true);
+    expect(policy.canAccessChannel(owner, "other-id")).toBe(false);
+    expect(policy.canAccessChannel(admin, "other-id")).toBe(false);
   });
 });
 

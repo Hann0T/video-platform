@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import { NotFoundError } from "../../lib/http.js";
+import { DEFAULT_VISIBILITY, type Visibility } from "../../lib/visibility.js";
 import type { Gate } from "../../authorization/gate.js";
 import type { PolicyUser } from "../../authorization/policies/video.policy.js";
 import type { StorageService } from "./storage.service.js";
@@ -12,6 +13,7 @@ export type PublicVideo = {
   filename: string;
   mimeType: string;
   sizeBytes: number;
+  visibility: Visibility;
   ownerId: string;
   createdAt: Date;
   updatedAt: Date;
@@ -28,11 +30,26 @@ export type UploadedFile = {
 export type CreateVideoInput = {
   title: string;
   description?: string;
+  visibility?: Visibility;
 };
 
 export type UpdateVideoInput = {
   title?: string;
   description?: string | null;
+  visibility?: Visibility;
+};
+
+type VideoRow = {
+  id: string;
+  title: string;
+  description: string | null;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  visibility: string;
+  ownerId: string;
+  createdAt: Date;
+  updatedAt: Date;
 };
 
 /**
@@ -40,8 +57,9 @@ export type UpdateVideoInput = {
  * (StorageService, Gate, PrismaClient) are injected via the constructor so the
  * service is unit-testable with fakes.
  *
- * Ownership-gated update/delete load the resource, then ask the Gate to
- * authorize the action against the loaded record (owner OR *.any permission).
+ * Every read or write of a single video goes through the Gate against the
+ * loaded record. Videos the user may not see are reported as NotFound (404),
+ * never Forbidden, so private videos can't be discovered by guessing ids.
  */
 export class VideosService {
   constructor(
@@ -52,7 +70,8 @@ export class VideosService {
 
   /**
    * Persist metadata for an already-stored upload. If the DB write fails, the
-   * orphaned file is removed so disk and DB stay consistent.
+   * orphaned file is removed so disk and DB stay consistent. Videos default to
+   * private unless a visibility is given.
    */
   async create(
     ownerId: string,
@@ -68,6 +87,7 @@ export class VideosService {
           path: file.path,
           mimeType: file.mimetype,
           sizeBytes: file.size,
+          visibility: input.visibility ?? DEFAULT_VISIBILITY,
           ownerId,
         },
       });
@@ -79,39 +99,50 @@ export class VideosService {
     }
   }
 
-  /** List all videos (newest first). */
-  async list(): Promise<PublicVideo[]> {
+  /** The feed: every public video, newest first. */
+  async listFeed(): Promise<PublicVideo[]> {
     const videos = await this.prisma.video.findMany({
+      where: { visibility: "public" },
       orderBy: { createdAt: "desc" },
     });
     return videos.map((v) => this.toPublic(v));
   }
 
-  /** Get a single video by id, or throw NotFound. */
-  async getById(id: string): Promise<PublicVideo> {
-    const video = await this.prisma.video.findUnique({ where: { id } });
-    if (!video) {
-      throw new NotFoundError("Video not found");
-    }
-    return this.toPublic(video);
+  /**
+   * All of a channel's videos (any visibility), newest first. Only the channel
+   * owner may call this; anyone else gets Forbidden (403).
+   */
+  async listChannel(
+    user: PolicyUser,
+    channelUserId: string,
+  ): Promise<PublicVideo[]> {
+    this.gate.authorizeChannel(user, channelUserId);
+    const videos = await this.prisma.video.findMany({
+      where: { ownerId: channelUserId },
+      orderBy: { createdAt: "desc" },
+    });
+    return videos.map((v) => this.toPublic(v));
+  }
+
+  /** Get a single video the user is allowed to see, or throw NotFound. */
+  async getById(user: PolicyUser, id: string): Promise<PublicVideo> {
+    return this.toPublic(await this.loadViewable(user, id));
   }
 
   /**
-   * Update a video's metadata. Loads the record, authorizes the acting user
-   * via the Gate (owner with update.own OR anyone with update.any), then
-   * applies the change. Throws NotFound (404) or Forbidden (403).
+   * Update a video's metadata or visibility. Loads the record (404 if the user
+   * can't see it), authorizes the update via the Gate (owner with update.own
+   * OR anyone with update.any), then applies the change. Throws NotFound (404)
+   * or Forbidden (403).
    */
   async update(
     user: PolicyUser,
     id: string,
     input: UpdateVideoInput,
   ): Promise<PublicVideo> {
-    const existing = await this.prisma.video.findUnique({ where: { id } });
-    if (!existing) {
-      throw new NotFoundError("Video not found");
-    }
+    const existing = await this.loadViewable(user, id);
 
-    this.gate.authorizeVideo(user, "update", { ownerId: existing.ownerId });
+    this.gate.authorizeVideo(user, "update", this.resourceOf(existing));
 
     const updated = await this.prisma.video.update({
       where: { id },
@@ -119,6 +150,9 @@ export class VideosService {
         ...(input.title !== undefined ? { title: input.title } : {}),
         ...(input.description !== undefined
           ? { description: input.description }
+          : {}),
+        ...(input.visibility !== undefined
+          ? { visibility: input.visibility }
           : {}),
       },
     });
@@ -131,28 +165,34 @@ export class VideosService {
    * file deletion fails we don't leave a dangling DB record.
    */
   async delete(user: PolicyUser, id: string): Promise<void> {
-    const existing = await this.prisma.video.findUnique({ where: { id } });
-    if (!existing) {
-      throw new NotFoundError("Video not found");
-    }
+    const existing = await this.loadViewable(user, id);
 
-    this.gate.authorizeVideo(user, "delete", { ownerId: existing.ownerId });
+    this.gate.authorizeVideo(user, "delete", this.resourceOf(existing));
 
     await this.prisma.video.delete({ where: { id } });
     await this.storage.delete(existing.filename);
   }
 
-  private toPublic(video: {
-    id: string;
-    title: string;
-    description: string | null;
-    filename: string;
-    mimeType: string;
-    sizeBytes: number;
-    ownerId: string;
-    createdAt: Date;
-    updatedAt: Date;
-  }): PublicVideo {
+  /**
+   * Load a video the user is allowed to see. Missing and not-viewable both
+   * throw NotFound so a 403 never confirms that a private video exists.
+   */
+  private async loadViewable(user: PolicyUser, id: string): Promise<VideoRow> {
+    const video = await this.prisma.video.findUnique({ where: { id } });
+    if (!video || !this.gate.canVideo(user, "view", this.resourceOf(video))) {
+      throw new NotFoundError("Video not found");
+    }
+    return video;
+  }
+
+  private resourceOf(video: VideoRow) {
+    return {
+      ownerId: video.ownerId,
+      visibility: video.visibility as Visibility,
+    };
+  }
+
+  private toPublic(video: VideoRow): PublicVideo {
     return {
       id: video.id,
       title: video.title,
@@ -160,6 +200,7 @@ export class VideosService {
       filename: video.filename,
       mimeType: video.mimeType,
       sizeBytes: video.sizeBytes,
+      visibility: video.visibility as Visibility,
       ownerId: video.ownerId,
       createdAt: video.createdAt,
       updatedAt: video.updatedAt,

@@ -75,14 +75,30 @@ All responses use the `{ data, error }` envelope. Protected routes require an
 ### Videos
 | Method | Path | Permission / Gate | Description |
 | --- | --- | --- | --- |
-| POST | `/videos` | `video.create` | Multipart upload (`video` file + `title`, optional `description`) |
-| GET | `/videos` | `video.read` | List videos (newest first) |
-| GET | `/videos/:id` | `video.read` | Get one video |
-| PATCH | `/videos/:id` | Gate: owner (`update.own`) or `update.any` | Update title/description |
-| DELETE | `/videos/:id` | Gate: owner (`delete.own`) or `delete.any` | Delete file + row |
+| GET | `/feed` | `video.read` | Every **public** video, newest first |
+| GET | `/studio/channels/:userId/videos` | Channel owner only | All of the owner's videos, any visibility |
+| POST | `/studio/channels/:userId/videos` | Channel owner only + `video.create` | Multipart upload (`video` file + `title`, optional `description`, optional `visibility`) |
+| GET | `/videos/:id` | Gate: view | Get one video |
+| PATCH | `/videos/:id` | Gate: view + owner (`update.own`) or `update.any` | Update title/description/visibility |
+| DELETE | `/videos/:id` | Gate: view + owner (`delete.own`) or `delete.any` | Delete file + row |
+
+### Visibility rules
+
+Each video is `private` (default), `public` or `unlisted`.
+
+- **View:** the owner can always view. Moderators (`update.any` or
+  `delete.any`) can view any video. Everyone else needs `video.read` and the
+  video must be `public`. `unlisted` behaves like `private` until link-based
+  access exists.
+- **Not viewable means 404.** `GET`, `PATCH` and `DELETE /videos/:id` answer
+  404 for a video the user can't view, the same as for a missing id, so private
+  videos can't be discovered by guessing ids.
+- **Channels are owner-only.** `/studio/channels/:userId/*` answers 403 unless
+  `:userId` is the authenticated user. No role overrides this. The check runs
+  before multer, so a rejected upload never writes a file.
 
 Coarse permission checks run as route middleware (`authorize(...)`);
-ownership-aware checks (update/delete) run in the service via the injected
+ownership- and visibility-aware checks run in the service via the injected
 `Gate`, which loads the resource and applies `VideoPolicy`.
 
 ## Scripts

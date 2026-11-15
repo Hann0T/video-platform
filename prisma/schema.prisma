@@ -71,10 +71,14 @@ model Video {
   path        String // absolute/relative path on disk
   mimeType    String
   sizeBytes   Int
+  // "private" | "public" | "unlisted" (validated in code; SQLite has no enums).
+  // Defaults to private so a video is never exposed by accident.
+  visibility  String   @default("private")
   ownerId     String
   owner       User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   @@index([ownerId])
+  @@index([visibility, createdAt])
 }

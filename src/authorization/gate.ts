@@ -3,6 +3,7 @@ import {
   VideoPolicy,
   type OwnedResource,
   type PolicyUser,
+  type VideoResource,
 } from "./policies/video.policy.js";
 
 export type VideoAction = "view" | "update" | "delete";
@@ -22,7 +23,7 @@ export class Gate {
   authorizeVideo(
     user: PolicyUser,
     action: VideoAction,
-    resource: OwnedResource,
+    resource: VideoResource,
   ): void {
     const allowed = this.canVideo(user, action, resource);
     if (!allowed) {
@@ -36,11 +37,11 @@ export class Gate {
   canVideo(
     user: PolicyUser,
     action: VideoAction,
-    resource: OwnedResource,
+    resource: VideoResource,
   ): boolean {
     switch (action) {
       case "view":
-        return this.videoPolicy.canView(user);
+        return this.videoPolicy.canView(user, resource);
       case "update":
         return this.videoPolicy.canUpdate(user, resource);
       case "delete":
@@ -52,4 +53,13 @@ export class Gate {
       }
     }
   }
+
+  /** Authorize access to a studio channel; throws ForbiddenError (403). */
+  authorizeChannel(user: PolicyUser, channelUserId: string): void {
+    if (!this.videoPolicy.canAccessChannel(user, channelUserId)) {
+      throw new ForbiddenError("You can only access your own channel");
+    }
+  }
 }
+
+export type { OwnedResource };

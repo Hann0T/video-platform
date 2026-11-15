@@ -30,14 +30,33 @@ export function createVideosController(videosService: VideosService) {
       },
     ),
 
-    list: asyncHandler(async (_req: Request, res: Response) => {
-      const videos = await videosService.list();
+    feed: asyncHandler(async (_req: Request, res: Response) => {
+      const videos = await videosService.listFeed();
       res.status(200).json(ok(videos));
     }),
 
+    listChannel: asyncHandler(
+      async (req: Request<{ userId: string }>, res: Response) => {
+        if (!req.user) {
+          throw new UnauthorizedError("Authentication required");
+        }
+        const videos = await videosService.listChannel(
+          { id: req.user.id, permissions: req.user.permissions },
+          req.params.userId,
+        );
+        res.status(200).json(ok(videos));
+      },
+    ),
+
     getById: asyncHandler(
       async (req: Request<{ id: string }>, res: Response) => {
-        const video = await videosService.getById(req.params.id);
+        if (!req.user) {
+          throw new UnauthorizedError("Authentication required");
+        }
+        const video = await videosService.getById(
+          { id: req.user.id, permissions: req.user.permissions },
+          req.params.id,
+        );
         res.status(200).json(ok(video));
       },
     ),

@@ -8,7 +8,11 @@
  */
 export { StorageService } from "./storage.service.js";
 export { VideosService } from "./videos.service.js";
-export { createVideosRouter } from "./videos.routes.js";
+export {
+  createVideosRouter,
+  createFeedRouter,
+  createStudioRouter,
+} from "./videos.routes.js";
 export type { StorageConfig } from "./storage.service.js";
 export type {
   PublicVideo,

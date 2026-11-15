@@ -18,11 +18,13 @@ import { setupTestDb, type TestDb } from "./helpers/test-db.js";
 
 const creds = { email: "uploader@example.com", password: "password123" };
 
-describe("videos upload + list/get (integration)", () => {
+describe("studio upload + get (integration)", () => {
   let db: TestDb;
   let container: Container;
   let app: Express;
   let uploadDir: string;
+  let channelId = "someone";
+  const uploadPath = () => `/studio/channels/${channelId}/videos`;
 
   beforeAll(async () => {
     db = setupTestDb();
@@ -51,7 +53,8 @@ describe("videos upload + list/get (integration)", () => {
   });
 
   async function accessToken(): Promise<string> {
-    await request(app).post("/auth/register").send(creds);
+    const reg = await request(app).post("/auth/register").send(creds);
+    channelId = reg.body.data.id;
     const res = await request(app).post("/auth/login").send(creds);
     return res.body.data.accessToken;
   }
@@ -64,7 +67,7 @@ describe("videos upload + list/get (integration)", () => {
   it("uploads a video, stores the file, and persists metadata (201)", async () => {
     const token = await accessToken();
     const res = await request(app)
-      .post("/videos")
+      .post(uploadPath())
       .set("Authorization", `Bearer ${token}`)
       .field("title", "Holiday clip")
       .field("description", "Beach")
@@ -90,7 +93,7 @@ describe("videos upload + list/get (integration)", () => {
 
   it("rejects an unauthenticated upload with 401", async () => {
     const res = await request(app)
-      .post("/videos")
+      .post(uploadPath())
       .field("title", "x")
       .attach("video", Buffer.from("bytes"), {
         filename: "x.mp4",
@@ -102,7 +105,7 @@ describe("videos upload + list/get (integration)", () => {
   it("rejects a non-video file with 415", async () => {
     const token = await accessToken();
     const res = await request(app)
-      .post("/videos")
+      .post(uploadPath())
       .set("Authorization", `Bearer ${token}`)
       .field("title", "x")
       .attach("video", Buffer.from("text"), {
@@ -115,7 +118,7 @@ describe("videos upload + list/get (integration)", () => {
   it("rejects missing title with 422 (validation runs after multer)", async () => {
     const token = await accessToken();
     const res = await request(app)
-      .post("/videos")
+      .post(uploadPath())
       .set("Authorization", `Bearer ${token}`)
       .attach("video", Buffer.from("bytes"), {
         filename: "x.mp4",
@@ -125,10 +128,10 @@ describe("videos upload + list/get (integration)", () => {
     expect(res.body.error.code).toBe("VALIDATION_ERROR");
   });
 
-  it("lists videos and gets one by id", async () => {
+  it("gets one's own video by id", async () => {
     const token = await accessToken();
     const created = await request(app)
-      .post("/videos")
+      .post(uploadPath())
       .set("Authorization", `Bearer ${token}`)
       .field("title", "Clip A")
       .attach("video", Buffer.from("bytes"), {
@@ -136,12 +139,6 @@ describe("videos upload + list/get (integration)", () => {
         contentType: "video/mp4",
       });
     const id = created.body.data.id;
-
-    const list = await request(app)
-      .get("/videos")
-      .set("Authorization", `Bearer ${token}`);
-    expect(list.status).toBe(200);
-    expect(list.body.data.length).toBe(1);
 
     const one = await request(app)
       .get(`/videos/${id}`)
@@ -162,7 +159,7 @@ describe("videos upload + list/get (integration)", () => {
     const token = await accessToken();
     const before = readdirSync(uploadDir).length;
     const res = await request(app)
-      .post("/videos")
+      .post(uploadPath())
       .set("Authorization", `Bearer ${token}`)
       .field("title", "Clip")
       .attach("video", Buffer.from("bytes"), {
