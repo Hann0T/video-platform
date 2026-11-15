@@ -210,4 +210,18 @@ export const api = {
 
   deleteVideo: (id: string) =>
     request<{ success: true }>(`/videos/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  getVideo: (id: string) => request<Video>(`/videos/${encodeURIComponent(id)}`),
+
+  /**
+   * Get a short-lived stream URL. A <video> element can't send the Bearer
+   * header, so the server signs a URL with a token for this user and video.
+   */
+  async playback(id: string): Promise<{ url: string; expiresAt: string }> {
+    const data = await request<{ url: string; expiresAt: string }>(
+      `/videos/${encodeURIComponent(id)}/playback`,
+      { method: "POST" },
+    );
+    return { ...data, url: BASE_URL + data.url };
+  },
 };

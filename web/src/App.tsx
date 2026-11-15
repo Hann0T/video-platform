@@ -6,6 +6,7 @@ import { FeedPage } from "./pages/FeedPage";
 import { StatusPage } from "./pages/StatusPage";
 import { StudioChannelPage } from "./pages/StudioChannelPage";
 import { StudioCreatePage } from "./pages/StudioCreatePage";
+import { WatchPage } from "./pages/WatchPage";
 
 export function App() {
   return (
@@ -16,6 +17,7 @@ export function App() {
         <Route element={<Layout />}>
           <Route path="/" element={<Navigate to="/feed" replace />} />
           <Route path="/feed" element={<FeedPage />} />
+          <Route path="/watch/:videoId" element={<WatchPage />} />
           <Route path="/studio/channel/:userId" element={<StudioChannelPage />} />
           <Route path="/studio/channel/:userId/create" element={<StudioCreatePage />} />
         </Route>

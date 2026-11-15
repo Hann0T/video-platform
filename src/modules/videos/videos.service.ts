@@ -1,9 +1,11 @@
+import type { Readable } from "node:stream";
 import type { PrismaClient } from "@prisma/client";
 import { NotFoundError } from "../../lib/http.js";
 import { DEFAULT_VISIBILITY, type Visibility } from "../../lib/visibility.js";
 import type { Gate } from "../../authorization/gate.js";
 import type { PolicyUser } from "../../authorization/policies/video.policy.js";
 import type { StorageService } from "./storage.service.js";
+import type { PlaybackTokenService } from "./playback-token.service.js";
 
 /** Video metadata safe to return over the API. */
 export type PublicVideo = {
@@ -39,6 +41,20 @@ export type UpdateVideoInput = {
   visibility?: Visibility;
 };
 
+export type Playback = {
+  /** Path + query to request; the client prefixes the API origin. */
+  url: string;
+  expiresAt: Date;
+};
+
+export type StreamSource = {
+  mimeType: string;
+  /** Actual size on disk, in bytes. */
+  size: number;
+  /** Open the file, optionally a byte range [start, end] inclusive. */
+  open: (range?: { start: number; end: number }) => Readable;
+};
+
 type VideoRow = {
   id: string;
   title: string;
@@ -66,6 +82,7 @@ export class VideosService {
     private readonly prisma: PrismaClient,
     private readonly storage: StorageService,
     private readonly gate: Gate,
+    private readonly playbackTokens: PlaybackTokenService,
   ) {}
 
   /**
@@ -127,6 +144,39 @@ export class VideosService {
   /** Get a single video the user is allowed to see, or throw NotFound. */
   async getById(user: PolicyUser, id: string): Promise<PublicVideo> {
     return this.toPublic(await this.loadViewable(user, id));
+  }
+
+  /**
+   * Issue a short-lived stream URL for a video the user may view. Same view
+   * rule as getById: 404 when missing or not viewable.
+   */
+  async createPlayback(user: PolicyUser, id: string): Promise<Playback> {
+    const video = await this.loadViewable(user, id);
+    const { token, expiresAt } = this.playbackTokens.sign({
+      sub: user.id,
+      vid: video.id,
+    });
+    return {
+      url: `/videos/${encodeURIComponent(video.id)}/stream?token=${encodeURIComponent(token)}`,
+      expiresAt,
+    };
+  }
+
+  /**
+   * Resolve the stored file for streaming. Re-checks the view rule on every
+   * call, so a video made private stops streaming even with a valid token.
+   */
+  async getStreamSource(user: PolicyUser, id: string): Promise<StreamSource> {
+    const video = await this.loadViewable(user, id);
+    const size = await this.storage.size(video.filename);
+    if (size === null) {
+      throw new NotFoundError("Video file not found");
+    }
+    return {
+      mimeType: video.mimeType,
+      size,
+      open: (range) => this.storage.createReadStream(video.filename, range),
+    };
   }
 
   /**

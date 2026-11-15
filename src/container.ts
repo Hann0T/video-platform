@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { getConfig, type AppConfig } from "./config/index.js";
 import { createPrismaClient, type PrismaClient } from "./db/prisma.js";
 import { UsersService } from "./modules/users/index.js";
@@ -8,7 +9,15 @@ import {
 } from "./middleware/authenticate.js";
 import { Gate } from "./authorization/gate.js";
 import { VideoPolicy } from "./authorization/policies/video.policy.js";
-import { StorageService, VideosService } from "./modules/videos/index.js";
+import {
+  PlaybackTokenService,
+  StorageService,
+  VideosService,
+} from "./modules/videos/index.js";
+import {
+  createAuthenticatePlayback,
+  type AuthenticatePlayback,
+} from "./middleware/authenticate-playback.js";
 import {
   createUploadMiddleware,
   type UploadMiddleware,
@@ -30,8 +39,10 @@ export type Container = {
   tokenService: TokenService;
   authService: AuthService;
   authenticate: Authenticate;
+  authenticatePlayback: AuthenticatePlayback;
   gate: Gate;
   storageService: StorageService;
+  playbackTokens: PlaybackTokenService;
   videosService: VideosService;
   upload: UploadMiddleware;
 };
@@ -73,7 +84,26 @@ export function createContainer(overrides: ContainerOverrides = {}): Container {
   const upload = createUploadMiddleware(storageService);
 
   // --- videos module ---
-  const videosService = new VideosService(prisma, storageService, gate);
+  // Playback tokens get their own key so they can never pass as access tokens.
+  // If no secret is configured, derive one from the access secret with HMAC.
+  const playbackTokens = new PlaybackTokenService({
+    secret:
+      config.stream?.secret ??
+      createHmac("sha256", config.jwt.accessSecret)
+        .update("playback-token-v1")
+        .digest("hex"),
+    expiresIn: config.stream?.expiresIn ?? "2h",
+  });
+  const authenticatePlayback = createAuthenticatePlayback(
+    playbackTokens,
+    usersService,
+  );
+  const videosService = new VideosService(
+    prisma,
+    storageService,
+    gate,
+    playbackTokens,
+  );
 
   return {
     config,
@@ -82,8 +112,10 @@ export function createContainer(overrides: ContainerOverrides = {}): Container {
     tokenService,
     authService,
     authenticate,
+    authenticatePlayback,
     gate,
     storageService,
+    playbackTokens,
     videosService,
     upload,
   };

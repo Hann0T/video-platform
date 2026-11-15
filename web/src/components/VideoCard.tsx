@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Link } from "react-router-dom";
 import type { Video } from "../api/client";
 
 export function formatSize(bytes: number): string {
@@ -6,12 +7,14 @@ export function formatSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-/** Metadata card. Playback arrives with the streaming endpoint. */
+/** Metadata card; the title links to the watch page. */
 export function VideoCard({ video, actions }: { video: Video; actions?: ReactNode }) {
   return (
     <li className="video">
       <div>
-        <h3>{video.title}</h3>
+        <h3>
+          <Link to={`/watch/${video.id}`}>{video.title}</Link>
+        </h3>
         {video.description && <p>{video.description}</p>}
         <p className="muted">
           {formatSize(video.sizeBytes)} · {video.mimeType} ·{" "}

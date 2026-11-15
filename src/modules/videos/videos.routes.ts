@@ -23,6 +23,7 @@ import {
 export function createVideosRouter(
   videosService: VideosService,
   authenticate: RequestHandler,
+  authenticatePlayback: RequestHandler,
 ): Router {
   const router = Router();
   const controller = createVideosController(videosService);
@@ -32,6 +33,23 @@ export function createVideosRouter(
     authenticate,
     validate({ params: videoIdParamSchema }),
     controller.getById,
+  );
+
+  // Issue a short-lived stream URL (Bearer auth, same view rule as GET /:id).
+  router.post(
+    "/:id/playback",
+    authenticate,
+    validate({ params: videoIdParamSchema }),
+    controller.playback,
+  );
+
+  // Byte stream with Range support. Auth comes from the ?token= query param
+  // because <video> can't send headers. The view rule is re-checked here.
+  router.get(
+    "/:id/stream",
+    validate({ params: videoIdParamSchema }),
+    authenticatePlayback,
+    controller.stream,
   );
 
   router.patch(

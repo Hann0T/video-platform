@@ -79,6 +79,8 @@ All responses use the `{ data, error }` envelope. Protected routes require an
 | GET | `/studio/channels/:userId/videos` | Channel owner only | All of the owner's videos, any visibility |
 | POST | `/studio/channels/:userId/videos` | Channel owner only + `video.create` | Multipart upload (`video` file + `title`, optional `description`, optional `visibility`) |
 | GET | `/videos/:id` | Gate: view | Get one video |
+| POST | `/videos/:id/playback` | Gate: view | Returns `{ url, expiresAt }`, a short-lived signed stream URL |
+| GET/HEAD | `/videos/:id/stream?token=…` | Playback token + Gate: view | Video bytes with HTTP Range support (200 / 206 / 416) |
 | PATCH | `/videos/:id` | Gate: view + owner (`update.own`) or `update.any` | Update title/description/visibility |
 | DELETE | `/videos/:id` | Gate: view + owner (`delete.own`) or `delete.any` | Delete file + row |
 
@@ -100,6 +102,25 @@ Each video is `private` (default), `public` or `unlisted`.
 Coarse permission checks run as route middleware (`authorize(...)`);
 ownership- and visibility-aware checks run in the service via the injected
 `Gate`, which loads the resource and applies `VideoPolicy`.
+
+### Streaming
+
+A `<video>` element can't send an `Authorization` header, so playback is a
+two-step flow:
+
+1. The client calls `POST /videos/:id/playback` with its Bearer token. If the
+   user can view the video, the server returns a URL like
+   `/videos/:id/stream?token=…`.
+2. The client sets that URL as the `<video>` `src`. The browser then makes
+   `Range` requests to it for playback and seeking.
+
+The playback token is a JWT bound to one user and one video, with
+`aud: "playback"`. It is signed with its own key (`STREAM_TOKEN_SECRET`, or an
+HMAC derived from `JWT_ACCESS_SECRET` when unset), so it can't be used as an
+access token, and the reverse doesn't work either. It expires after
+`STREAM_TOKEN_EXPIRES_IN` (default `2h`). The stream endpoint loads the user and
+re-checks the view rule on every request, so making a video private stops
+playback immediately, even for URLs already handed out.
 
 ## Scripts
 

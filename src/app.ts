@@ -45,7 +45,11 @@ export function createApp(container: Container): Express {
   app.use("/auth", createAuthRouter(container.authService, container.authenticate));
   app.use(
     "/videos",
-    createVideosRouter(container.videosService, container.authenticate),
+    createVideosRouter(
+      container.videosService,
+      container.authenticate,
+      container.authenticatePlayback,
+    ),
   );
   app.use(
     "/feed",

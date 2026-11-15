@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
-import { unlink } from "node:fs/promises";
+import { createReadStream, existsSync, mkdirSync, type ReadStream } from "node:fs";
+import { stat, unlink } from "node:fs/promises";
 import { extname, isAbsolute, join, resolve } from "node:path";
 
 export type StorageConfig = {
@@ -53,6 +53,25 @@ export class StorageService {
   /** Absolute path for a stored filename. */
   resolvePath(filename: string): string {
     return join(this.uploadDir, filename);
+  }
+
+  /** Size in bytes of a stored file, or null if it is missing. */
+  async size(filename: string): Promise<number | null> {
+    try {
+      const info = await stat(this.resolvePath(filename));
+      return info.isFile() ? info.size : null;
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw err;
+    }
+  }
+
+  /** Read a stored file, optionally a byte range [start, end] inclusive. */
+  createReadStream(
+    filename: string,
+    range?: { start: number; end: number },
+  ): ReadStream {
+    return createReadStream(this.resolvePath(filename), range);
   }
 
   /** Delete a stored file by filename. Idempotent (ignores ENOENT). */

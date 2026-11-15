@@ -8,15 +8,18 @@
  */
 export { StorageService } from "./storage.service.js";
 export { VideosService } from "./videos.service.js";
+export { PlaybackTokenService } from "./playback-token.service.js";
 export {
   createVideosRouter,
   createFeedRouter,
   createStudioRouter,
 } from "./videos.routes.js";
 export type { StorageConfig } from "./storage.service.js";
+export type { PlaybackTokenConfig } from "./playback-token.service.js";
 export type {
   PublicVideo,
   CreateVideoInput,
   UpdateVideoInput,
   UploadedFile,
+  Playback,
 } from "./videos.service.js";

@@ -24,6 +24,11 @@ const envSchema = z.object({
   MAX_FILE_SIZE: z.coerce.number().int().positive().default(104857600),
 
   CORS_ORIGIN: z.string().min(1).default("http://localhost:3000"),
+
+  // Playback tokens (signed stream URLs). The secret is optional: when unset it
+  // is derived from JWT_ACCESS_SECRET, and is always distinct from it.
+  STREAM_TOKEN_SECRET: z.string().min(1).optional(),
+  STREAM_TOKEN_EXPIRES_IN: z.string().min(1).default("2h"),
 });
 
 export type AppConfig = {
@@ -39,6 +44,11 @@ export type AppConfig = {
   uploadDir: string;
   maxFileSize: number;
   corsOrigin: string;
+  /** Optional so hand-built configs (tests) can omit it; see container.ts. */
+  stream?: {
+    secret?: string;
+    expiresIn: string;
+  };
 };
 
 function resolveDatabaseUrl(
@@ -86,6 +96,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     uploadDir: e.UPLOAD_DIR,
     maxFileSize: e.MAX_FILE_SIZE,
     corsOrigin: e.CORS_ORIGIN,
+    stream: {
+      secret: e.STREAM_TOKEN_SECRET,
+      expiresIn: e.STREAM_TOKEN_EXPIRES_IN,
+    },
   };
 }
 
